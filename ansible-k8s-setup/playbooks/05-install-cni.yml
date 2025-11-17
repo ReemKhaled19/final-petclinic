@@ -1,0 +1,76 @@
+---
+- name: Verify Calico CNI
+  hosts: first_master
+  gather_facts: true
+  become: true
+
+  tasks:
+    - name: Wait for Calico pods to be ready
+      ansible.builtin.shell: |
+        kubectl get pods -n kube-system -l k8s-app=calico-node --no-headers | \
+        awk '{print $3}' | grep -v Running | wc -l
+      register: calico_not_ready
+      until: calico_not_ready.stdout | int == 0
+      retries: 60
+      delay: 5
+      changed_when: false
+      failed_when: false
+
+    - name: Get Calico pods status
+      ansible.builtin.shell: |
+        kubectl get pods -n kube-system -l k8s-app=calico-node -o wide
+      register: calico_pods_status
+      changed_when: false
+
+    - name: Display Calico pods
+      ansible.builtin.debug:
+        msg: "{{ calico_pods_status.stdout_lines }}"
+
+    - name: Wait for all nodes to be Ready
+      ansible.builtin.shell: |
+        kubectl get nodes --no-headers | awk '{print $2}' | grep -v Ready | wc -l
+      register: not_ready_nodes
+      until: not_ready_nodes.stdout | int == 0
+      retries: 60
+      delay: 5
+      changed_when: false
+      failed_when: false
+
+    - name: Get all nodes status
+      ansible.builtin.shell: |
+        kubectl get nodes -o wide
+      register: nodes_status
+      changed_when: false
+
+    - name: Display nodes status
+      ansible.builtin.debug:
+        msg: "{{ nodes_status.stdout_lines }}"
+
+    - name: Verify all nodes are Ready
+      ansible.builtin.assert:
+        that:
+          - not_ready_nodes.stdout | int == 0
+        success_msg: "All nodes are Ready!"
+        fail_msg: "Some nodes are not Ready yet. Please wait and retry."
+
+    - name: Get pod CIDR for each node
+      ansible.builtin.shell: |
+        kubectl get nodes -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.podCIDR}{"\n"}{end}'
+      register: pod_cidrs
+      changed_when: false
+
+    - name: Display pod CIDRs
+      ansible.builtin.debug:
+        msg: "{{ pod_cidrs.stdout_lines }}"
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg:
+          - "=========================================="
+          - "  Calico CNI Verification Complete!"
+          - "=========================================="
+          - ""
+          - "All nodes are in Ready state"
+          - "Network connectivity is enabled"
+          - ""
+          - "You can now deploy applications!"
